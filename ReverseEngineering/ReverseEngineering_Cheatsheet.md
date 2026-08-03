@@ -86,6 +86,14 @@ gdb -q ./binary
 (gdb) dump memory unpacked.bin <start_addr> <end_addr>
 ```
 
+**Custom packer/obfuscated function stalling static decompilation? Emulate it in isolation instead:**
+```bash
+python3 unicorn_emulate_template.py    # customize CODE_BYTES/addresses at the top first
+```
+Pulls just the suspicious function's raw bytes (from objdump/Ghidra) and runs them under
+Unicorn Engine standalone — no need to fight the packer's anti-debug/self-modifying tricks
+live, and you can inspect/brute-force register or memory state at any point mid-emulation.
+
 **Common obfuscation tells:** huge blob of high-entropy bytes in `.data`/`.rodata`, tiny `.text` section, single suspicious function called from `_start` before `main`, `mprotect`/`mmap` calls with `PROT_EXEC` right before a jump to a computed address. DIE's entropy graph view will visually flag these regions instantly.
 
 **IDA Free vs requesting Binary Ninja:**
@@ -172,6 +180,16 @@ $GHIDRA_HOME/support/analyzeHeadless <project_dir> <project_name> \
     -import ./binary -postScript DecompileAll.java -deleteProject
 ```
 (see `ghidra_headless_analyze.sh` in your toolkit repo for a ready script)
+
+**Don't want to grep the entire decompiled dump by hand? Rank functions by suspicion first:**
+```bash
+./ghidra_autotag.sh ./binary
+```
+Batch-analyzes with Ghidra headless and scores every function by calls to dangerous/
+interesting libc functions (`system`, `strcpy`, `gets`, `strcmp`/`memcmp`, `ptrace`,
+`mprotect`, etc), writes a ranked report, and bookmarks hits inside the Ghidra project
+so they're visible in the GUI too. Run this *before* `ghidra_headless_analyze.sh`'s
+full dump on a large/unfamiliar binary — it tells you which functions to read first.
 
 **IDA Pro keyboard shortcuts (if available):**
 | Key | Action |
@@ -347,14 +365,17 @@ strings ./binary | grep -iE '^[A-Za-z0-9+/]{16,}={0,2}$'   # base64 blobs (often
 ```
 file → checksec → strings | grep flag → nm (stripped?) →
 if packed: unpack (upx -d) → objdump -d skim for main →
-open in Ghidra/r2, auto-analyze → trace main → find comparison/flag-construction logic
+open in Ghidra/r2, auto-analyze → for large/unfamiliar binaries run ghidra_autotag.sh
+first to rank functions by suspicion → trace main → find comparison/flag-construction logic
 ```
 
 **Crackme / license-check style:**
 ```
 Find the comparison (strcmp/memcmp/manual byte loop) → set breakpoint right after →
 inspect register/stack for expected value → if input transformed (XOR/add loop),
-reverse the transform manually or symbolic-exec with angr_template.py
+reverse the transform manually or symbolic-exec with angr_template.py →
+if the transform function itself is obfuscated/hard to decompile, emulate it
+standalone with unicorn_emulate_template.py instead of reversing it by hand
 ```
 
 **Binary refuses to run under debugger (anti-debug):**
