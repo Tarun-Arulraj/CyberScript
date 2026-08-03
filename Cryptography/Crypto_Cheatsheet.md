@@ -216,8 +216,10 @@ print(bytes(x^y for x,y in zip(a,b)))
 ## 6. Hashing
 
 ```bash
-# hashid isn't in your toolset -- identify by length/format instead (see table below),
-# or let hashcat/john's auto-detect handle it:
+# use hash_id_and_crack.py from your toolkit to identify by length/format
+# (see table below for the same logic), then optionally shell out to
+# hashcat/john directly:
+python3 hash_id_and_crack.py identify <hash>
 hashcat --identify hash.txt                       # hashcat's built-in mode-guessing (newer versions)
 john --format=auto hash.txt --wordlist=rockyou.txt   # john auto-detects format on its own
 
@@ -235,6 +237,13 @@ hashpump -s '<known_hash>' -d '<known_message>' -a '<data_to_append>' -k <keylen
 
 ## 7. Diffie-Hellman / Discrete Log
 
+**Use `dlog_solver.py` from your toolkit first — auto-picks brute force / BSGS / Pohlig-Hellman based on how smooth `p-1` is, and can derive the shared secret once you have the exponent:**
+```bash
+python3 dlog_solver.py --p <p> --g <g> --A <A> --auto
+python3 dlog_solver.py --p <p> --g <g> --A <A> --auto --derive-shared --peer-pubkey <B>
+```
+
+**Manual fallback / for understanding:**
 ```bash
 # Small prime p -> brute-force discrete log
 python3 -c "
@@ -280,6 +289,21 @@ print('private key:', priv)
 
 Common in "predict the next random number" or "guess the seed" crypto challenges.
 
+**Use `prng_lcg_solver.py` from your toolkit — covers three cases depending on what's known:**
+```bash
+# a, c, m all known -> recover seed via z3 (same pattern as the inline example below)
+python3 prng_lcg_solver.py --known-params --a <a> --c <c> --m <m> --observed <o1> <o2> <o3> --predict 3
+
+# a, c known, m unknown -> recover m via GCD of differences (exact, no z3 needed)
+python3 prng_lcg_solver.py --recover-modulus --a <a> --c <c> --observed <o1> <o2> <o3> <o4>
+
+# nothing known -> blind recovery of a, c, AND m (needs 6-8+ consecutive outputs)
+python3 prng_lcg_solver.py --recover-all --observed <o1> <o2> <o3> <o4> <o5> <o6> <o7> <o8> --predict 3
+```
+Note: blind/GCD recovery can return an exact small multiple of the true `m` — if it
+doesn't match a known constant (2**31-1, 2**32, 2**48, 2**64), try `m // 2`, `m // 3`, etc.
+
+**Inline reference (what the script's `--known-params` mode automates):**
 ```python
 from z3 import *
 
@@ -351,6 +375,21 @@ python3 -c "print(int('<suspicious_number>').bit_length())" # bit length hints R
 Check length/charset → base64/hex decode → CyberChef Magic (offline) →
 if looks like letters only: classical cipher → if numbers: RSA/DH (try RsaCtfTool) →
 if block-aligned bytes: AES → if garbled but same length as plaintext: try xortool first, then manual XOR
+```
+
+**DH / discrete log challenge:**
+```
+Run dlog_solver.py --auto first (it factors p-1 and picks brute force/BSGS/Pohlig-Hellman) →
+if it reports the group is too large: check for leaked partial bits or a weak generator →
+once x is recovered, derive the shared secret directly (--derive-shared --peer-pubkey)
+```
+
+**"Predict the PRNG" challenge:**
+```
+Identify what's known (a/c/m all given? just a/c? nothing?) →
+run prng_lcg_solver.py in the matching mode (--known-params / --recover-modulus / --recover-all) →
+sanity-check recovered m against 2**31-1/2**32/2**48/2**64 →
+predict forward with --predict N
 ```
 
 **RSA challenge:**
